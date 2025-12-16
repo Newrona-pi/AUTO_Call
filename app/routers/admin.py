@@ -40,8 +40,6 @@ def delete_scenario(scenario_id: int, db: Session = Depends(get_db)):
     if not db_scenario:
         raise HTTPException(status_code=404, detail="Scenario not found")
     
-    # Cascade delete questions? Or keep them? Usually cascade or error.
-    # For simplicity, we manually delete questions first or rely on DB FK (sqlite default is no action usually)
     db.query(models.Question).filter(models.Question.scenario_id == scenario_id).delete()
     db.delete(db_scenario)
     db.commit()
@@ -73,7 +71,6 @@ def update_question(question_id: int, question_update: schemas.QuestionBase, db:
     if not db_question:
         raise HTTPException(status_code=404, detail="Question not found")
     
-    # Only update text/order, not scenario_id usually
     db_question.text = question_update.text
     db_question.sort_order = question_update.sort_order
     db_question.is_active = question_update.is_active
@@ -101,17 +98,36 @@ def read_questions_by_scenario(scenario_id: int, db: Session = Depends(get_db)):
 # --- Phone Numbers ---
 @router.post("/phone_numbers/", response_model=schemas.PhoneNumber)
 def create_or_update_phone_number(phone: schemas.PhoneNumberCreate, db: Session = Depends(get_db)):
-    db_phone = db.query(models.PhoneNumber).filter(models.PhoneNumber.to_number == phone.to_number).first()
+    # Normalize: ensure + prefix
+    to_number = phone.to_number.strip()
+    if not to_number.startswith('+'):
+        to_number = '+' + to_number
+    
+    db_phone = db.query(models.PhoneNumber).filter(models.PhoneNumber.to_number == to_number).first()
     if db_phone:
         db_phone.scenario_id = phone.scenario_id
         db_phone.label = phone.label
         db_phone.is_active = phone.is_active
     else:
-        db_phone = models.PhoneNumber(**phone.dict())
+        db_phone = models.PhoneNumber(
+            to_number=to_number,
+            scenario_id=phone.scenario_id,
+            label=phone.label,
+            is_active=phone.is_active
+        )
         db.add(db_phone)
     db.commit()
     db.refresh(db_phone)
     return db_phone
+
+@router.delete("/phone_numbers/{to_number}")
+def delete_phone_number(to_number: str, db: Session = Depends(get_db)):
+    db_phone = db.query(models.PhoneNumber).filter(models.PhoneNumber.to_number == to_number).first()
+    if not db_phone:
+        raise HTTPException(status_code=404, detail="Phone number not found")
+    db.delete(db_phone)
+    db.commit()
+    return {"message": "Phone number deleted"}
 
 @router.get("/phone_numbers/", response_model=List[schemas.PhoneNumber])
 def read_phone_numbers(db: Session = Depends(get_db)):
@@ -134,9 +150,6 @@ def read_calls(
         query = query.filter(models.Call.from_number == from_number)
         
     calls = query.order_by(models.Call.started_at.desc()).offset(skip).limit(limit).all()
-    
-    # Populating scenario_id for schema if needed, ORM handles it via relationship if named correctly
-    # Schema says scenario_id: int, Model has scenario_id column. OK.
     return calls 
 
 @router.get("/export_csv")
@@ -154,7 +167,6 @@ def export_calls_csv(
     stream = io.StringIO()
     writer = csv.writer(stream)
     
-    # Header
     writer.writerow(["CallSid", "Date", "To", "From", "ScenarioID", "Question", "AnswerType", "RecordingURL", "Transcript"])
     
     for call in calls:

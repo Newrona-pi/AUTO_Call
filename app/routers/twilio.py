@@ -18,9 +18,14 @@ async def handle_incoming_call(
     CallSid: str = Form(...),
     db: Session = Depends(get_db)
 ):
-    # Normalize phone number (remove spaces, hyphens, parentheses)
+    # Normalize phone number (remove spaces, hyphens, parentheses, and handle + prefix)
     def normalize_phone(number):
-        return number.replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
+        # Remove common formatting characters
+        normalized = number.replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
+        # Ensure it starts with +
+        if not normalized.startswith('+'):
+            normalized = '+' + normalized
+        return normalized
     
     to_normalized = normalize_phone(To)
     

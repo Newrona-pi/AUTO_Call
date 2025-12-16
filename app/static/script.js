@@ -26,7 +26,7 @@ function showNotification(title, items) {
     setTimeout(() => {
         overlay.style.opacity = '0';
         setTimeout(() => overlay.remove(), 200);
-    }, 2000); // 2 seconds
+    }, 2000);
 }
 
 // --- Tab Switching ---
@@ -232,7 +232,6 @@ function renderQuestions() {
             </div>
         `;
 
-        // Drag events
         div.addEventListener('dragstart', handleDragStart);
         div.addEventListener('dragover', handleDragOver);
         div.addEventListener('drop', handleDrop);
@@ -307,7 +306,6 @@ async function saveNewOrder() {
         }
     });
 
-    // Save all updates
     for (const update of updates) {
         await fetch(`${API_BASE}/questions/${update.id}`, {
             method: 'PUT',
@@ -366,7 +364,6 @@ document.getElementById('question-form').onsubmit = async (e) => {
     let method = 'POST';
     let isNewQuestion = !qId;
 
-    // Auto-assign next order number
     const nextOrder = currentQuestions.length + 1;
 
     if (qId) {
@@ -405,7 +402,7 @@ async function deleteQuestion(id) {
     showNotification('削除完了', '質問を削除しました');
 }
 
-// --- Numbers & Logs ---
+// --- Phone Numbers ---
 async function loadPhoneNumbers() {
     const sRes = await fetch(`${API_BASE}/scenarios/`);
     const scenarios = await sRes.json();
@@ -424,18 +421,34 @@ async function loadPhoneNumbers() {
         const scName = sc ? escapeHtml(sc.name) : `ID: ${p.scenario_id}`;
 
         tbody.innerHTML += `
-            <tr>
+            <tr onclick="editPhoneNumber('${escapeHtml(p.to_number)}', ${p.scenario_id}, '${escapeHtml(p.label || '')}')">
                 <td>${escapeHtml(p.to_number)}</td>
                 <td>${scName}</td>
                 <td>${escapeHtml(p.label || '-')}</td>
-                <td><button class="small secondary">編集</button></td>
+                <td onclick="event.stopPropagation();">
+                    <button class="small danger" onclick="deletePhoneNumber('${escapeHtml(p.to_number)}')">削除</button>
+                </td>
             </tr>`;
     });
 }
 
+function editPhoneNumber(number, scenarioId, label) {
+    document.getElementById('phone-number').value = number;
+    document.getElementById('number-scenario-select').value = scenarioId;
+    document.getElementById('phone-label').value = label;
+    document.getElementById('phone-number').focus();
+}
+
+async function deletePhoneNumber(number) {
+    if (!confirm(`電話番号「${number}」を削除しますか？`)) return;
+    await fetch(`${API_BASE}/phone_numbers/${encodeURIComponent(number)}`, { method: 'DELETE' });
+    loadPhoneNumbers();
+    showNotification('削除完了', `電話番号「${number}」を削除しました`);
+}
+
 document.getElementById('number-form').onsubmit = async (e) => {
     e.preventDefault();
-    const to = document.getElementById('phone-number').value;
+    const to = document.getElementById('phone-number').value.trim();
     const sid = document.getElementById('number-scenario-select').value;
     const label = document.getElementById('phone-label').value;
 
@@ -444,10 +457,13 @@ document.getElementById('number-form').onsubmit = async (e) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ to_number: to, scenario_id: parseInt(sid), label: label, is_active: true })
     });
+
+    document.getElementById('number-form').reset();
     loadPhoneNumbers();
     showNotification('保存完了', `電話番号「${to}」を設定しました`);
 };
 
+// --- Logs ---
 async function loadLogs() {
     const to = document.getElementById('filter-to').value;
     let url = `${API_BASE}/calls/?limit=50`;
