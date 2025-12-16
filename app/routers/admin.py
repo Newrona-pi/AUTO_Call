@@ -200,14 +200,26 @@ def read_calls(
     limit: int = 100, 
     to_number: Optional[str] = None, 
     from_number: Optional[str] = None,
+    start_date: Optional[str] = None,  # YYYY-MM-DD format
+    end_date: Optional[str] = None,    # YYYY-MM-DD format
     db: Session = Depends(get_db)
 ):
+    from datetime import datetime
+    
     query = db.query(models.Call).options(joinedload(models.Call.answers).joinedload(models.Answer.question))
     
     if to_number:
         query = query.filter(models.Call.to_number == to_number)
     if from_number:
         query = query.filter(models.Call.from_number == from_number)
+    
+    if start_date:
+        start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+        query = query.filter(models.Call.started_at >= start_dt)
+    if end_date:
+        from datetime import timedelta
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+        query = query.filter(models.Call.started_at < end_dt)
         
     calls = query.order_by(models.Call.started_at.desc()).offset(skip).limit(limit).all()
     return calls 
@@ -215,12 +227,26 @@ def read_calls(
 @router.get("/export_csv")
 def export_calls_csv(
     to_number: Optional[str] = None,
+    from_number: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
+    from datetime import datetime, timedelta
+    
     query = db.query(models.Call).options(joinedload(models.Call.answers).joinedload(models.Answer.question))
     
     if to_number:
         query = query.filter(models.Call.to_number == to_number)
+    if from_number:
+        query = query.filter(models.Call.from_number == from_number)
+    
+    if start_date:
+        start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+        query = query.filter(models.Call.started_at >= start_dt)
+    if end_date:
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+        query = query.filter(models.Call.started_at < end_dt)
     
     calls = query.order_by(models.Call.started_at.desc()).all()
     

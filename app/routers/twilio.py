@@ -20,18 +20,33 @@ TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 
 async def transcribe_with_whisper(answer_id: int, recording_url: str, recording_sid: str):
     """Transcribe audio using OpenAI Whisper API"""
+    import time
+    
     try:
         if not OPENAI_API_KEY:
             print("OpenAI API key not configured")
             return
         
-        # Download audio from Twilio
+        # Download audio from Twilio with retry logic
         audio_url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Recordings/{recording_sid}.mp3"
-        audio_response = requests.get(audio_url, auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN))
         
-        if audio_response.status_code != 200:
-            print(f"Failed to download recording: {recording_sid}")
-            return
+        max_retries = 5
+        retry_delay = 2  # seconds
+        audio_response = None
+        
+        for attempt in range(max_retries):
+            audio_response = requests.get(audio_url, auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN))
+            
+            if audio_response.status_code == 200:
+                break
+            
+            if attempt < max_retries - 1:
+                print(f"Recording not ready yet (attempt {attempt + 1}/{max_retries}), retrying in {retry_delay}s...")
+                time.sleep(retry_delay)
+                retry_delay *= 2  # Exponential backoff
+            else:
+                print(f"Failed to download recording after {max_retries} attempts: {recording_sid}")
+                return
         
         # Save temporarily
         temp_file = f"/tmp/{recording_sid}.mp3"
