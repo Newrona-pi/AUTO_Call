@@ -79,37 +79,38 @@
                                 <p class="help-text">※質問リストの前に読み上げられます。その後、1.5秒経過後に最初の質問が始まります。</p>
                             </div>
 
-                            <div class="actions-right">
-                                <button type="submit" class="primary">保存する</button>
+                            <!-- Questions Area -->
+                            <div id="questions-area">
+                                <h3>質問リスト <span class="description-inline">※ドラッグで並び替え可能</span></h3>
+
+                                <div id="questions-container">
+                                    <!-- JS renders questions here with drag & drop -->
+                                </div>
+
+                                <div class="add-question-box">
+                                    <h4><i class="fas fa-plus-circle"></i> 質問を追加</h4>
+                                    <!-- New UI for adding questions locally first -->
+                                    <div class="form-row" style="align-items: flex-start;">
+                                        <div style="flex: 1;">
+                                            <textarea id="new-question-text" placeholder="質問文を入力してください"
+                                                style="min-height: 60px;"></textarea>
+                                        </div>
+                                        <button type="button" class="secondary small" onclick="addQuestionToList()"
+                                            style="margin-top: 4px;">
+                                            <i class="fas fa-arrow-up"></i> リストに追加
+                                        </button>
+                                    </div>
+                                    <p class="help-text">※「リストに追加」ボタンで上のリストに追加し、最後にまとめて「保存する」ボタンで保存してください。</p>
+                                </div>
+                            </div>
+
+                            <div class="actions-right"
+                                style="margin-top: 20px; border-top: 1px solid #eee; padding-top: 20px;">
+                                <button type="submit" class="primary" style="font-size: 1.1rem; padding: 10px 30px;">
+                                    <i class="fas fa-save"></i> すべて保存する
+                                </button>
                             </div>
                         </form>
-
-                        <hr style="margin: 2rem 0; border: 0; border-top: 1px solid #eee;">
-
-                        <!-- Questions Area (Always visible now) -->
-                        <div id="questions-area">
-                            <h3>質問リスト <span class="description-inline">※ドラッグで並び替え可能</span></h3>
-
-                            <div id="questions-container">
-                                <!-- JS renders questions here with drag & drop -->
-                            </div>
-
-                            <div class="add-question-box">
-                                <h4><i class="fas fa-plus-circle"></i> 質問を追加</h4>
-                                <form id="question-form">
-                                    <input type="hidden" id="question-id">
-                                    <div class="form-group">
-                                        <textarea id="question-text" placeholder="例：お名前をおっしゃってください。"
-                                            required></textarea>
-                                    </div>
-                                    <div class="actions-right">
-                                        <button type="button" class="secondary"
-                                            onclick="resetQuestionForm()">クリア</button>
-                                        <button type="submit">質問を保存</button>
-                                    </div>
-                                </form>
-                            </div>
-                        </div>
                     </div>
                 </div>
             </div>
@@ -161,12 +162,27 @@
         <!-- Tab 3: Logs -->
         <section id="tab-logs" class="tab-content">
             <div class="panel">
-                <div class="header-actions">
+                <div class="header-actions" style="flex-direction: column; align-items: flex-start;">
                     <h2>通話ログ</h2>
-                    <div class="actions">
+                    <div class="actions filter-bar"
+                        style="width: 100%; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 10px;">
                         <input type="text" id="filter-to" placeholder="To番号で検索" class="search-input">
-                        <button onclick="loadLogs()"><i class="fas fa-search"></i></button>
-                        <button onclick="exportCSV()" class="secondary"><i class="fas fa-file-csv"></i> CSV出力</button>
+
+                        <div class="date-range">
+                            <label>期間:</label>
+                            <input type="date" id="filter-start-date">
+                            <span>~</span>
+                            <input type="date" id="filter-end-date">
+                        </div>
+
+                        <button onclick="loadLogs()"><i class="fas fa-search"></i> 検索</button>
+
+                        <div style="flex: 1;"></div> <!-- Spacer -->
+
+                        <div class="export-actions" style="display: flex; gap: 10px;">
+                            <button onclick="exportCSV()" class="secondary"><i class="fas fa-file-csv"></i>
+                                全員分CSV一括DL</button>
+                        </div>
                     </div>
                 </div>
                 <table id="logs-table">
@@ -176,7 +192,7 @@
                             <th>From</th>
                             <th>To</th>
                             <th>シナリオ</th>
-                            <th>回答データ</th>
+                            <th>回答データ / 音声一括DL</th>
                         </tr>
                     </thead>
                     <tbody></tbody>

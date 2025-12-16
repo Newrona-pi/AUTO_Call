@@ -427,6 +427,23 @@ tbody tr:hover {
     color: #2980b9;
 }
 
+.download-link-text {
+    color: #e67e22;
+    font-size: 0.85rem;
+    text-decoration: none;
+    margin-left: 8px;
+    display: inline-block;
+    padding: 2px 6px;
+    border: 1px solid #e67e22;
+    border-radius: 3px;
+    transition: all 0.2s;
+}
+
+.download-link-text:hover {
+    background: #e67e22;
+    color: white;
+}
+
 .btn-download-all {
     display: inline-block;
     background: #27ae60;
@@ -479,4 +496,21 @@ tbody tr:hover {
 
 .create-btn:hover {
     background: #2980b9;
+}
+
+.filter-bar {
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 4px;
+    border: 1px solid #eee;
+}
+
+.date-range {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.date-range input {
+    width: auto;
 }
