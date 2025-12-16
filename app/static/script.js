@@ -74,12 +74,16 @@ function showCreateScenarioForm() {
 }
 
 // --- Scenario Actions ---
-document.getElementById('scenario-form').onsubmit = async (e) => {
-    e.preventDefault();
+async function saveScenario() {
     const id = document.getElementById('scenario-id').value;
     const name = document.getElementById('scenario-name').value;
     const greeting = document.getElementById('scenario-greeting').value;
     const disclaimer = document.getElementById('scenario-disclaimer').value;
+
+    if (!name) {
+        alert('シナリオ名を入力してください');
+        return null;
+    }
 
     const payload = { name, greeting_text: greeting, disclaimer_text: disclaimer };
 
@@ -104,7 +108,18 @@ document.getElementById('scenario-form').onsubmit = async (e) => {
             currentScenario = saved;
             document.getElementById('scenario-id').value = saved.id;
             document.getElementById('editor-title').textContent = "シナリオ編集: " + saved.name;
+        } else {
+            currentScenario = saved;
         }
+        return saved;
+    }
+    return null;
+}
+
+document.getElementById('scenario-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const saved = await saveScenario();
+    if (saved) {
         loadScenarios();
         alert('保存しました');
     }
@@ -148,7 +163,10 @@ async function copyScenario(scenarioId) {
         });
     }
 
-    alert('コピーしました');
+    // Immediately select the new scenario (fast response)
+    await selectScenario(newScenario.id);
+
+    // Then refresh list in background
     loadScenarios();
 }
 
@@ -207,12 +225,16 @@ function populateOrderSelect() {
     const currentEditId = document.getElementById('question-id').value;
     if (currentEditId) {
         const editingQ = currentQuestions.find(q => q.id == currentEditId);
-        if (editingQ && !usedOrders.includes(editingQ.sort_order)) {
-            const opt = document.createElement('option');
-            opt.value = editingQ.sort_order;
-            opt.textContent = editingQ.sort_order;
-            opt.selected = true;
-            select.appendChild(opt);
+        if (editingQ) {
+            // Re-add the current order for editing
+            const currentOrder = editingQ.sort_order;
+            if (!Array.from(select.options).find(o => o.value == currentOrder)) {
+                const opt = document.createElement('option');
+                opt.value = currentOrder;
+                opt.textContent = currentOrder;
+                select.appendChild(opt);
+            }
+            select.value = currentOrder;
         }
     }
 }
@@ -234,9 +256,16 @@ function resetQuestionForm() {
 
 document.getElementById('question-form').onsubmit = async (e) => {
     e.preventDefault();
-    if (!currentScenario) {
-        alert('先にシナリオを保存してください');
-        return;
+
+    // Auto-save scenario if not saved yet
+    if (!currentScenario || !document.getElementById('scenario-id').value) {
+        const saved = await saveScenario();
+        if (!saved) {
+            alert('シナリオの保存に失敗しました');
+            return;
+        }
+        // Refresh list to show new scenario
+        loadScenarios();
     }
 
     const qId = document.getElementById('question-id').value;
