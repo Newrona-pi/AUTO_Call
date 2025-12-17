@@ -359,6 +359,7 @@ h3 {
     margin: 0 0 10px 0;
     color: #2c3e50;
     font-size: 1.3rem;
+    margin-bottom: 5px;
 }
 
 .notification-modal p {
@@ -453,6 +454,7 @@ tbody tr:hover {
     text-decoration: none;
     font-size: 0.85rem;
     transition: all 0.2s;
+    white-space: nowrap;
 }
 
 .btn-download-all:hover {
@@ -513,4 +515,19 @@ tbody tr:hover {
 
 .date-range input {
     width: auto;
+}
+
+/* Phase 1 Additions */
+.ending-item {
+    background: #fffdf0 !important;
+    border: 1px dashed #f1c40f !important;
+}
+
+.ending-item.drag-over {
+    border-top: 3px solid #f39c12 !important;
+}
+
+.ending-item .q-order {
+    background: #f39c12 !important;
+    color: #fff !important;
 }

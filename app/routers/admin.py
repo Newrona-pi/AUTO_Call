@@ -1,17 +1,34 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse, Response
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 import csv
 import io
 import os
 import requests
+import secrets
+from datetime import datetime
 from ..database import get_db
 from .. import models, schemas
+
+security = HTTPBasic()
+
+def get_current_username(credentials: HTTPBasicCredentials = Depends(security)):
+    correct_username = secrets.compare_digest(credentials.username, "admin")
+    correct_password = secrets.compare_digest(credentials.password, "attendme")
+    if not (correct_username and correct_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials.username
 
 router = APIRouter(
     prefix="/admin",
     tags=["admin"],
+    dependencies=[Depends(get_current_username)]
 )
 
 # Twilio credentials from environment
@@ -46,18 +63,24 @@ def delete_scenario(scenario_id: int, db: Session = Depends(get_db)):
     if not db_scenario:
         raise HTTPException(status_code=404, detail="Scenario not found")
     
-    db.query(models.Question).filter(models.Question.scenario_id == scenario_id).delete()
-    db.delete(db_scenario)
+    # Soft delete
+    db_scenario.deleted_at = datetime.utcnow()
+    # No longer deleting questions or phone number associations immediately
+    # db.query(models.Question).filter(models.Question.scenario_id == scenario_id).delete()
+    
     db.commit()
-    return {"message": "Scenario deleted"}
+    return {"message": "Scenario deleted (soft)"}
 
 @router.get("/scenarios/", response_model=List[schemas.Scenario])
 def read_scenarios(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    return db.query(models.Scenario).offset(skip).limit(limit).all()
+    return db.query(models.Scenario).filter(models.Scenario.deleted_at.is_(None)).order_by(models.Scenario.id.desc()).offset(skip).limit(limit).all()
 
 @router.get("/scenarios/{scenario_id}", response_model=schemas.Scenario)
 def read_scenario(scenario_id: int, db: Session = Depends(get_db)):
-    db_scenario = db.query(models.Scenario).filter(models.Scenario.id == scenario_id).first()
+    db_scenario = db.query(models.Scenario).options(
+        joinedload(models.Scenario.ending_guidances)
+    ).filter(models.Scenario.id == scenario_id).first()
+    
     if db_scenario is None:
         raise HTTPException(status_code=404, detail="Scenario not found")
     return db_scenario
@@ -100,6 +123,44 @@ def read_questions_by_scenario(scenario_id: int, db: Session = Depends(get_db)):
     return db.query(models.Question).filter(
         models.Question.scenario_id == scenario_id
     ).order_by(models.Question.sort_order).all()
+
+# --- Ending Guidance ---
+@router.post("/ending_guidances/", response_model=schemas.EndingGuidance)
+def create_ending_guidance(guidance: schemas.EndingGuidanceCreate, db: Session = Depends(get_db)):
+    db_guidance = models.EndingGuidance(**guidance.dict())
+    db.add(db_guidance)
+    db.commit()
+    db.refresh(db_guidance)
+    return db_guidance
+
+@router.put("/ending_guidances/{guidance_id}", response_model=schemas.EndingGuidance)
+def update_ending_guidance(guidance_id: int, guidance_update: schemas.EndingGuidanceBase, db: Session = Depends(get_db)):
+    db_guidance = db.query(models.EndingGuidance).filter(models.EndingGuidance.id == guidance_id).first()
+    if not db_guidance:
+        raise HTTPException(status_code=404, detail="Guidance not found")
+    
+    db_guidance.text = guidance_update.text
+    db_guidance.sort_order = guidance_update.sort_order
+    
+    db.commit()
+    db.refresh(db_guidance)
+    return db_guidance
+
+@router.delete("/ending_guidances/{guidance_id}")
+def delete_ending_guidance(guidance_id: int, db: Session = Depends(get_db)):
+    db_guidance = db.query(models.EndingGuidance).filter(models.EndingGuidance.id == guidance_id).first()
+    if not db_guidance:
+        raise HTTPException(status_code=404, detail="Guidance not found")
+    
+    db.delete(db_guidance)
+    db.commit()
+    return {"message": "Guidance deleted"}
+
+@router.get("/scenarios/{scenario_id}/ending_guidances", response_model=List[schemas.EndingGuidance])
+def read_ending_guidances_by_scenario(scenario_id: int, db: Session = Depends(get_db)):
+    return db.query(models.EndingGuidance).filter(
+        models.EndingGuidance.scenario_id == scenario_id
+    ).order_by(models.EndingGuidance.sort_order).all()
 
 # --- Phone Numbers ---
 @router.post("/phone_numbers/", response_model=schemas.PhoneNumber)
@@ -162,27 +223,42 @@ def download_recording(recording_sid: str):
 @router.get("/download_call_recordings/{call_sid}")
 def download_call_recordings(call_sid: str, db: Session = Depends(get_db)):
     """Download all recordings for a call as a ZIP file"""
-    import zipfile
+    import pyzipper
+    import re
     
     if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN:
         raise HTTPException(status_code=500, detail="Twilio credentials not configured")
     
     # Get all answers for this call
     answers = db.query(models.Answer).filter(models.Answer.call_sid == call_sid).all()
+    # Also fetch Call for naming
+    call = db.query(models.Call).filter(models.Call.call_sid == call_sid).first()
     
     if not answers:
         raise HTTPException(status_code=404, detail="No recordings found for this call")
     
+    # Naming Helpers
+    def sanitize(s): return re.sub(r'[\\/*?:"<>|]', "", s)
+    
+    date_part = call.started_at.strftime('%Y%m%d') if call else "00000000"
+    sc_name = sanitize(call.scenario.name) if call and call.scenario else "NoScenario"
+    to_num = call.to_number.replace('+','') if call else "000"
+    from_num = call.from_number.replace('+','') if call else "000"
+    short_sid = call_sid[-6:]
+    
     # Create ZIP in memory
     zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+    with pyzipper.AESZipFile(zip_buffer, 'w', compression=pyzipper.ZIP_DEFLATED, encryption=pyzipper.WZ_AES) as zip_file:
+        zip_file.setpassword(b"attendme")
+        zip_file.setencryption(pyzipper.WZ_AES, nbits=256)
+        
         for idx, answer in enumerate(answers, 1):
             if answer.recording_sid:
                 url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Recordings/{answer.recording_sid}.mp3"
                 response = requests.get(url, auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN))
                 
                 if response.status_code == 200:
-                    filename = f"Q{idx}_{answer.recording_sid}.mp3"
+                    filename = f"{date_part}_{sc_name}_{to_num}_{from_num}_{short_sid}_Q{idx}.mp3"
                     zip_file.writestr(filename, response.content)
     
     zip_buffer.seek(0)
@@ -202,11 +278,22 @@ def read_calls(
     from_number: Optional[str] = None,
     start_date: Optional[str] = None,  # YYYY-MM-DD format
     end_date: Optional[str] = None,    # YYYY-MM-DD format
+    scenario_status: str = "active",   # active or deleted
     db: Session = Depends(get_db)
 ):
     from datetime import datetime
     
-    query = db.query(models.Call).options(joinedload(models.Call.answers).joinedload(models.Answer.question))
+    query = db.query(models.Call).options(
+        joinedload(models.Call.answers).joinedload(models.Answer.question),
+        joinedload(models.Call.scenario),
+        joinedload(models.Call.messages)
+    )
+    
+    # Scenario Status Filter
+    if scenario_status == "active":
+        query = query.join(models.Scenario).filter(models.Scenario.deleted_at.is_(None))
+    elif scenario_status == "deleted":
+        query = query.join(models.Scenario).filter(models.Scenario.deleted_at.isnot(None))
     
     if to_number:
         query = query.filter(models.Call.to_number == to_number)
@@ -224,17 +311,28 @@ def read_calls(
     calls = query.order_by(models.Call.started_at.desc()).offset(skip).limit(limit).all()
     return calls 
 
-@router.get("/export_csv")
-def export_calls_csv(
+@router.get("/export_zip")
+def export_calls_zip(
     to_number: Optional[str] = None,
     from_number: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    scenario_status: str = "active",
     db: Session = Depends(get_db)
 ):
+    import pyzipper
     from datetime import datetime, timedelta
     
-    query = db.query(models.Call).options(joinedload(models.Call.answers).joinedload(models.Answer.question))
+    query = db.query(models.Call).options(
+        joinedload(models.Call.answers).joinedload(models.Answer.question),
+        joinedload(models.Call.scenario),
+        joinedload(models.Call.messages)
+    )
+    
+    if scenario_status == "active":
+        query = query.join(models.Scenario).filter(models.Scenario.deleted_at.is_(None))
+    elif scenario_status == "deleted":
+        query = query.join(models.Scenario).filter(models.Scenario.deleted_at.isnot(None))
     
     if to_number:
         query = query.filter(models.Call.to_number == to_number)
@@ -250,32 +348,75 @@ def export_calls_csv(
     
     calls = query.order_by(models.Call.started_at.desc()).all()
     
+    # helper for formatting
+    def format_domestic(phone):
+        if not phone: return ""
+        if phone.startswith("+81"): return "0" + phone[3:]
+        return phone
+        
     stream = io.StringIO()
     writer = csv.writer(stream)
     
-    writer.writerow(["CallSid", "Date", "To", "From", "ScenarioID", "Question", "AnswerType", "RecordingURL", "Transcript"])
+    writer.writerow(["CallSid", "Date", "To", "From", "ScenarioName", "Status", "Question", "AnswerType", "Transcript", "RecordingURL"])
+    
+    # Message CSV Stream
+    msg_stream = io.StringIO()
+    msg_writer = csv.writer(msg_stream)
+    msg_writer.writerow(["CallSid", "ScenarioName", "Date", "RecordingUrl", "Transcript", "RecordingSid"])
     
     for call in calls:
-        scenario_id = call.scenario_id if call.scenario_id else ""
+        scenario_name = call.scenario.name if call.scenario else "Unknown"
+        date_str = call.started_at.strftime("%Y-%m-%d %H:%M:%S")
+        to_dom = format_domestic(call.to_number)
+        from_dom = format_domestic(call.from_number)
         
+        # Calls CSV
         if not call.answers:
             writer.writerow([
-                call.call_sid, call.started_at, call.to_number, call.from_number, 
-                scenario_id, "", "", "", ""
+                call.call_sid, date_str, to_dom, from_dom, 
+                scenario_name, call.status, "-", "-", "-", "-"
             ])
         else:
             for ans in call.answers:
                 q_text = ans.question.text if ans.question else "Unknown"
                 writer.writerow([
-                    call.call_sid, call.started_at, call.to_number, call.from_number,
-                    scenario_id, q_text, ans.answer_type, 
-                    ans.recording_url_twilio or "", 
-                    ans.transcript_text or ""
+                    call.call_sid, date_str, to_dom, from_dom,
+                    scenario_name, call.status, q_text, ans.answer_type, 
+                    ans.transcript_text or "", 
+                    ans.recording_url_twilio or ""
                 ])
+        
+        # Messages CSV
+        for msg in call.messages:
+             msg_writer.writerow([
+                 call.call_sid, scenario_name, date_str,
+                 msg.recording_url or "",
+                 msg.transcript_text or "",
+                 msg.recording_sid or ""
+             ])
                 
-    response = StreamingResponse(iter([stream.getvalue()]), media_type="text/csv")
-    response.headers["Content-Disposition"] = "attachment; filename=export.csv"
-    return response
+    # Create ZIP in memory with AES encryption
+    zip_buffer = io.BytesIO()
+    with pyzipper.AESZipFile(zip_buffer, 'w', compression=pyzipper.ZIP_DEFLATED, encryption=pyzipper.WZ_AES) as zf:
+        zf.setpassword(b"attendme")
+        zf.setencryption(pyzipper.WZ_AES, nbits=256)
+        
+        today = datetime.now().strftime("%Y%m%d")
+        csv_filename = f"{today}_logs.csv"
+        zf.writestr(csv_filename, stream.getvalue())
+        
+        msg_filename = f"{today}_messages.csv"
+        zf.writestr(msg_filename, msg_stream.getvalue())
+        
+    zip_buffer.seek(0)
+    
+    filename = f"logs_{datetime.now().strftime('%Y%m%d%H%M')}.zip"
+    
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
 
 # --- Frontend Render ---
 from fastapi.templating import Jinja2Templates
@@ -288,3 +429,23 @@ def dashboard_ui(request: Request):
         "request": request, 
         "now_timestamp": int(time.time())
     })
+# --- Phase 2: Retry Transcription ---
+@router.post("/retranscribe/{answer_id}")
+async def retry_transcription(answer_id: int, db: Session = Depends(get_db)):
+    from .twilio import transcribe_with_whisper
+    import asyncio
+    
+    answer = db.query(models.Answer).filter(models.Answer.id == answer_id).first()
+    if not answer:
+        raise HTTPException(status_code=404, detail="Answer not found")
+    if not answer.recording_sid:
+        raise HTTPException(status_code=400, detail="No recording SID available")
+        
+    # Reset status
+    answer.transcript_status = "processing"
+    db.commit()
+    
+    # Run async
+    asyncio.create_task(transcribe_with_whisper(answer.id, answer.recording_url_twilio or "", answer.recording_sid))
+    
+    return {"message": "Transcription scheduled"}

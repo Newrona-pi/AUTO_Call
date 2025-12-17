@@ -100,8 +100,23 @@
                                             <i class="fas fa-arrow-up"></i> リストに追加
                                         </button>
                                     </div>
-                                    <p class="help-text">※「リストに追加」ボタンで上のリストに追加し、最後にまとめて「保存する」ボタンで保存してください。</p>
+                                    <p class="help-text">※「リストに追加」ボタンで上のリストに追加します。</p>
                                 </div>
+                            </div>
+
+                            <!-- Ending Guidance Area (New) -->
+                            <div id="ending-area"
+                                style="margin-top: 30px; padding-top: 20px; border-top: 1px dashed #ddd;">
+                                <h3>終話ガイダンス <span class="description-inline">※質問終了後に流すメッセージ（複数可）</span></h3>
+                                <div id="ending-container">
+                                    <!-- JS renders ending guidances here -->
+                                </div>
+                                <div style="margin-top: 10px;">
+                                    <button type="button" class="secondary small" onclick="addEndingGuidance()">
+                                        <i class="fas fa-plus"></i> 終話ガイダンスを追加
+                                    </button>
+                                </div>
+                                <p class="help-text">※0件の場合は既定の終了メッセージが流れます。最後に必ず「失礼いたします」が流れて切断されます。</p>
                             </div>
 
                             <div class="actions-right"
@@ -135,7 +150,7 @@
                                 </select>
                             </div>
                             <div class="form-group">
-                                <label>ラベル</label>
+                                <label>備考</label>
                                 <input type="text" id="phone-label" placeholder="〇〇店 代表電話">
                             </div>
                             <button type="submit">保存</button>
@@ -148,7 +163,7 @@
                                 <tr>
                                     <th>番号</th>
                                     <th>シナリオ</th>
-                                    <th>ラベル</th>
+                                    <th>備考</th>
                                     <th>操作</th>
                                 </tr>
                             </thead>
@@ -163,9 +178,19 @@
         <section id="tab-logs" class="tab-content">
             <div class="panel">
                 <div class="header-actions" style="flex-direction: column; align-items: flex-start;">
-                    <h2>通話ログ</h2>
+                    <h2>通話ログ・集計</h2>
+
+                    <!-- Scenario Tabs for Logs -->
+                    <div class="log-scenario-tabs" style="display: flex; gap: 0; margin-bottom: 15px; width: 100%;">
+                        <button class="log-tab-btn active" onclick="switchLogTab('active')" id="log-tab-active"
+                            style="padding: 10px 20px; border: 1px solid #ddd; background: #fff; cursor: pointer; border-right: none; font-weight: bold; border-radius: 4px 0 0 4px;">有効なシナリオ</button>
+                        <button class="log-tab-btn" onclick="switchLogTab('deleted')" id="log-tab-deleted"
+                            style="padding: 10px 20px; border: 1px solid #ddd; background: #f9f9f9; color: #666; cursor: pointer; border-radius: 0 4px 4px 0;">削除済シナリオ
+                            (アーカイブ)</button>
+                    </div>
+
                     <div class="actions filter-bar"
-                        style="width: 100%; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 10px;">
+                        style="width: 100%; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 5px;">
                         <input type="text" id="filter-to" placeholder="To番号で検索" class="search-input">
 
                         <div class="date-range">
@@ -180,8 +205,8 @@
                         <div style="flex: 1;"></div> <!-- Spacer -->
 
                         <div class="export-actions" style="display: flex; gap: 10px;">
-                            <button onclick="exportCSV()" class="secondary"><i class="fas fa-file-csv"></i>
-                                全員分CSV一括DL</button>
+                            <button onclick="exportZIP()" class="secondary"><i class="fas fa-file-archive"></i>
+                                ZIP一括DL (attendme)</button>
                         </div>
                     </div>
                 </div>

@@ -2,6 +2,22 @@ from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
 
+# --- EndingGuidance Schemas ---
+class EndingGuidanceBase(BaseModel):
+    text: str
+    sort_order: int = 0
+
+class EndingGuidanceCreate(EndingGuidanceBase):
+    scenario_id: int
+
+class EndingGuidance(EndingGuidanceBase):
+    id: int
+    scenario_id: int
+    created_at: datetime
+    
+    class Config:
+        orm_mode = True
+
 # --- Scenario Schemas ---
 class ScenarioBase(BaseModel):
     name: str
@@ -17,6 +33,8 @@ class Scenario(ScenarioBase):
     id: int
     created_at: datetime
     updated_at: datetime
+    deleted_at: Optional[datetime] = None
+    ending_guidances: List[EndingGuidance] = []
     
     class Config:
         orm_mode = True
@@ -59,8 +77,23 @@ class AnswerLog(BaseModel):
     id: int
     question_text: Optional[str]
     recording_url_twilio: Optional[str]
+    recording_sid: Optional[str]
+    transcript_text: Optional[str]
+    transcript_status: Optional[str]
+    question_sort_at_call: Optional[int]
+    created_at: datetime
+    
+    class Config:
+        orm_mode = True
+
+class MessageLog(BaseModel):
+    id: int
+    recording_url: Optional[str]
     transcript_text: Optional[str]
     created_at: datetime
+    
+    class Config:
+        orm_mode = True
 
 class CallLog(BaseModel):
     call_sid: str
@@ -69,8 +102,10 @@ class CallLog(BaseModel):
     scenario_id: Optional[int]
     scenario_name: Optional[str] = None
     status: str
+    recording_sid: Optional[str]
     started_at: datetime
     answers: List[AnswerLog] = []
+    messages: List[MessageLog] = []
 
     class Config:
         orm_mode = True

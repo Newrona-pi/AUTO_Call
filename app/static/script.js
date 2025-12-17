@@ -1,6 +1,7 @@
 const API_BASE = "/admin";
 let currentScenario = null;
 let currentQuestions = []; // Array of {id, text, sort_order, is_deleted, is_new, temp_id}
+let currentEndingGuidances = []; // Array of {id, text, sort_order, is_new, temp_id}
 let draggedElement = null;
 
 // --- Notification System ---
@@ -142,8 +143,7 @@ async function saveAll() {
         const savedScenario = await res.json();
 
         // 2. Save Questions
-        // Calculate current sort orders based on DOM order
-        const qItems = document.querySelectorAll('.question-item');
+        const qItems = document.querySelectorAll('#questions-container .question-item');
         const finalOrder = [];
         qItems.forEach((item, index) => {
             const indexInArray = parseInt(item.dataset.index);
@@ -152,16 +152,6 @@ async function saveAll() {
                 finalOrder.push({ ...q, sort_order: index + 1 });
             }
         });
-
-        // Process additions/updates/deletions
-        // Current logic: We will just sync everything.
-        // For simplicity:
-        // A. Delete removed questions (handled by immediate delete for now, or track deletions)
-        // B. Update/Create questions
-
-        // Note: For "deleted" questions, currently I implemented immediate delete on click.
-        // To support "bulk save" fully including deletions, we would need to track deleted IDs.
-        // For now, let's assume deletions are immediate (confirmation dialog) and this save is for additions/updates.
 
         const notificationItems = [`シナリオ「${savedScenario.name}」を保存しました`];
 
@@ -177,6 +167,38 @@ async function saveAll() {
 
             if (q.id && !q.is_new) {
                 qUrl += `${q.id}`;
+                qMethod = 'PUT';
+            }
+
+            await fetch(qUrl, {
+                method: qMethod,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(qBody)
+            });
+        }
+
+        // 3. Save Ending Guidances
+        const gItems = document.querySelectorAll('#ending-container .ending-item');
+        const gFinalOrder = [];
+        gItems.forEach((item, index) => {
+            const indexInArray = parseInt(item.dataset.index);
+            const g = currentEndingGuidances[indexInArray];
+            if (g) {
+                gFinalOrder.push({ ...g, sort_order: index + 1 });
+            }
+        });
+
+        for (const g of gFinalOrder) {
+            let qUrl = `${API_BASE}/ending_guidances/`;
+            let qMethod = 'POST';
+            let qBody = {
+                text: g.text,
+                sort_order: g.sort_order,
+                scenario_id: savedScenario.id
+            };
+
+            if (g.id && !g.is_new) {
+                qUrl += `${g.id}`;
                 qMethod = 'PUT';
             }
 
@@ -244,6 +266,22 @@ async function copyScenario(scenarioId) {
         });
     }
 
+    // Copy Ending Guidances
+    const egRes = await fetch(`${API_BASE}/scenarios/${scenarioId}/ending_guidances`);
+    const endingGuidances = await egRes.json();
+
+    for (const g of endingGuidances) {
+        await fetch(`${API_BASE}/ending_guidances/`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                text: g.text,
+                sort_order: g.sort_order,
+                scenario_id: newScenario.id
+            })
+        });
+    }
+
     await selectScenario(newScenario.id);
     loadScenarios();
     showNotification('コピー完了', `シナリオ「${newScenario.name}」を作成しました`);
@@ -264,6 +302,75 @@ async function loadQuestions(scenarioId) {
     const data = await res.json();
     currentQuestions = data.map(q => ({ ...q, is_new: false }));
     renderQuestions();
+
+    // Load Ending Guidances too
+    loadEndingGuidances(scenarioId);
+}
+
+// --- Ending Guidance Logic ---
+async function loadEndingGuidances(scenarioId) {
+    const res = await fetch(`${API_BASE}/scenarios/${scenarioId}/ending_guidances`);
+    const data = await res.json();
+    currentEndingGuidances = data.map(g => ({ ...g, is_new: false }));
+    renderEndingGuidances();
+}
+
+function addEndingGuidance() {
+    currentEndingGuidances.push({
+        id: null,
+        text: '',
+        sort_order: currentEndingGuidances.length + 1,
+        is_new: true,
+        temp_id: Date.now()
+    });
+    renderEndingGuidances();
+}
+
+function removeEndingGuidance(index) {
+    const g = currentEndingGuidances[index];
+    if (g.id && !g.is_new) {
+        if (!confirm('保存済みのガイダンスです。削除しますか？')) return;
+        fetch(`${API_BASE}/ending_guidances/${g.id}`, { method: 'DELETE' });
+    }
+    currentEndingGuidances.splice(index, 1);
+    renderEndingGuidances();
+}
+
+function updateEndingGuidanceText(index, val) {
+    currentEndingGuidances[index].text = val;
+}
+
+function renderEndingGuidances() {
+    const container = document.getElementById('ending-container');
+    container.innerHTML = '';
+
+    currentEndingGuidances.forEach((g, index) => {
+        const div = document.createElement('div');
+        div.className = 'ending-item question-item'; // Re-use question-item styles
+        div.draggable = true;
+        div.dataset.index = index;
+        div.dataset.type = 'ending';
+
+        div.innerHTML = `
+            <i class="fas fa-grip-vertical drag-handle"></i>
+            <div style="margin-left: 35px; width: 100%;">
+                <span class="q-order">#${index + 1}</span>
+                <input type="text" class="q-edit-input" value="${escapeHtml(g.text)}" 
+                    placeholder="終了メッセージを入力"
+                    onchange="updateEndingGuidanceText(${index}, this.value)" style="width: calc(100% - 120px);">
+            </div>
+            <div class="q-actions">
+                <button type="button" class="small danger" onclick="removeEndingGuidance(${index})">削除</button>
+            </div>
+        `;
+
+        div.addEventListener('dragstart', handleDragStart);
+        div.addEventListener('dragover', handleDragOver);
+        div.addEventListener('drop', handleDrop);
+        div.addEventListener('dragend', handleDragEnd);
+
+        container.appendChild(div);
+    });
 }
 
 // Add Enter key support outside loadQuestions, or in init
@@ -327,6 +434,7 @@ function renderQuestions() {
         div.draggable = true;
         // Use real ID or temp ID
         div.dataset.index = index;
+        div.dataset.type = 'question';
 
         div.innerHTML = `
             <i class="fas fa-grip-vertical drag-handle"></i>
@@ -388,24 +496,24 @@ function handleDrop(e) {
         e.stopPropagation();
     }
 
-    if (draggedElement !== this) {
+    if (draggedElement !== this && draggedElement.parentNode === this.parentNode) {
         // Reorder in DOM
-        if (draggedElement.parentNode === this.parentNode) {
-            const allItems = [...this.parentNode.children];
-            const draggedIndex = allItems.indexOf(draggedElement);
-            const targetIndex = allItems.indexOf(this);
+        // Check previous siblings count to determine index
+        const allItems = [...this.parentNode.children];
+        const draggedIndex = allItems.indexOf(draggedElement);
+        const targetIndex = allItems.indexOf(this);
 
-            if (draggedIndex < targetIndex) {
-                this.parentNode.insertBefore(draggedElement, this.nextSibling);
-            } else {
-                this.parentNode.insertBefore(draggedElement, this);
-            }
+        if (draggedIndex < targetIndex) {
+            this.parentNode.insertBefore(draggedElement, this.nextSibling);
+        } else {
+            this.parentNode.insertBefore(draggedElement, this);
+        }
 
-            // Reorder in Array
-            // Note: The DOM is already updated. We need to reflect this in currentQuestions.
-            // But doing it effectively requires mapping DOM back to array.
-            // Simplest way: re-read array from DOM
-            rebuildArrayFromDOM();
+        // Reorder in Array
+        if (this.dataset.type === 'ending') {
+            rebuildEndingGuidancesArray();
+        } else {
+            rebuildQuestionsArray();
         }
     }
 
@@ -418,17 +526,29 @@ function handleDragEnd(e) {
     document.querySelectorAll('.question-item').forEach(item => {
         item.classList.remove('drag-over');
     });
-    renderQuestions(); // Re-render to update order numbers
+    // This is redundant if handleDrop calls rebuild, but safe
+    if (this.dataset.type === 'ending') renderEndingGuidances();
+    else renderQuestions();
 }
 
-function rebuildArrayFromDOM() {
+function rebuildQuestionsArray() {
     const newArr = [];
-    const items = document.querySelectorAll('.question-item');
+    const items = document.querySelectorAll('#questions-container .question-item');
     items.forEach(item => {
         const index = parseInt(item.dataset.index);
         newArr.push(currentQuestions[index]);
     });
     currentQuestions = newArr;
+}
+
+function rebuildEndingGuidancesArray() {
+    const newArr = [];
+    const items = document.querySelectorAll('#ending-container .ending-item');
+    items.forEach(item => {
+        const index = parseInt(item.dataset.index);
+        newArr.push(currentEndingGuidances[index]);
+    });
+    currentEndingGuidances = newArr;
 }
 
 function getDragAfterElement(container, y) {
@@ -508,12 +628,21 @@ document.getElementById('number-form').onsubmit = async (e) => {
 };
 
 // --- Logs with Download ---
+let currentLogTab = 'active';
+
+function switchLogTab(status) {
+    currentLogTab = status;
+    document.querySelectorAll('.log-tab-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById(`log-tab-${status}`).classList.add('active');
+    loadLogs();
+}
+
 async function loadLogs() {
     const to = document.getElementById('filter-to').value;
     const start = document.getElementById('filter-start-date').value;
     const end = document.getElementById('filter-end-date').value;
 
-    let url = `${API_BASE}/calls/?limit=50`;
+    let url = `${API_BASE}/calls/?limit=50&scenario_status=${currentLogTab}`;
     if (to) url += `&to_number=${encodeURIComponent(to)}`;
     if (start) url += `&start_date=${start}`;
     if (end) url += `&end_date=${end}`;
@@ -523,45 +652,103 @@ async function loadLogs() {
     const tbody = document.querySelector('#logs-table tbody');
     tbody.innerHTML = '';
 
+    // Helper to format 090...
+    const formatPhone = (num) => {
+        if (!num) return '-';
+        if (num.startsWith('+81')) {
+            return '0' + num.slice(3);
+        }
+        return num;
+    };
+
     data.forEach(call => {
         let answersHtml = '';
         if (call.answers) {
             call.answers.forEach(a => {
                 let downloadLink = a.recording_sid ?
-                    `<br><a href="${API_BASE}/download_recording/${a.recording_sid}" class="download-link-text"><i class="fas fa-download"></i> 音声DL</a>` : '';
-                let transcript = a.transcript_text ? escapeHtml(a.transcript_text) : '<span style="color:#999;">(テキスト化処理中...)</span>';
-                answersHtml += `<div style="font-size:0.9rem; margin-bottom:8px; padding:8px; background:#f9f9f9; border-radius:4px;">
-                    <div style="color:#888; font-size:0.85rem; margin-bottom:4px;"><strong>Q:</strong> ${escapeHtml(a.question_text || '??')}</div>
-                    <div style="color:#2c3e50;"><strong>A:</strong> ${transcript} ${downloadLink}</div>
+                    `<a href="${API_BASE}/download_recording/${a.recording_sid}" class="download-link-text"><i class="fas fa-download"></i> 音声DL</a>` : '';
+
+                let transcriptDisplay = '';
+                if (a.transcript_text) {
+                    transcriptDisplay = escapeHtml(a.transcript_text);
+                } else {
+                    if (a.transcript_status === 'failed') {
+                        transcriptDisplay = `<span style="color:red;"><i class="fas fa-exclamation-circle"></i> 失敗</span> <button class="small secondary" onclick="retryTranscription(${a.id})" style="padding:2px 6px; font-size:0.75rem; margin-left:5px;">再試行</button>`;
+                    } else if (a.transcript_status === 'processing' || !a.transcript_status) {
+                        transcriptDisplay = '<span style="color:#f39c12;"><i class="fas fa-spinner fa-spin"></i> 処理中...</span>';
+                    } else {
+                        transcriptDisplay = '<span style="color:#999;">(テキストなし)</span>';
+                    }
+                }
+
+                // Show Answer logic (accordion style item)
+                answersHtml += `<div style="font-size:0.9rem; margin-bottom:8px; padding:8px; background:#fff; border: 1px solid #eee; border-radius:4px;">
+                    <div style="color:#555; font-size:0.85rem; margin-bottom:4px;"><strong>Q:</strong> ${escapeHtml(a.question_text || '??')}</div>
+                    <div style="color:#333; display: flex; justify-content: space-between; align-items: flex-start;">
+                        <span style="flex:1;">A: ${transcriptDisplay}</span>
+                        <span style="margin-left:10px; font-size: 0.8rem;">${downloadLink}</span>
+                    </div>
                 </div>`;
             });
         }
 
-        const bulkDownload = `<a href="${API_BASE}/download_call_recordings/${call.call_sid}" class="btn-download-all" title="全録音をZIPでダウンロード"><i class="fas fa-file-audio"></i> 音声一括DL</a>`;
+        // Phase 4: Messages UI
+        let messagesHtml = '';
+        if (call.messages && call.messages.length > 0) {
+            call.messages.forEach(m => {
+                let dlLink = m.recording_url ?
+                    `<a href="${m.recording_url}" target="_blank" class="download-link-text"><i class="fas fa-play"></i> 再生</a>` : '';
+
+                messagesHtml += `<div style="font-size:0.9rem; margin-top:8px; padding:8px; background:#e8f5e9; border: 1px solid #c8e6c9; border-radius:4px;">
+                   <div style="color:#2e7d32; font-size:0.85rem; margin-bottom:4px;"><strong><i class="fas fa-comment-dots"></i> 伝言:</strong></div>
+                   <div style="color:#333; display: flex; justify-content: space-between; align-items: flex-start;">
+                       <span style="flex:1;">${escapeHtml(m.transcript_text || '(音声のみ)')}</span>
+                       <span style="margin-left:10px; font-size: 0.8rem;">${dlLink}</span>
+                   </div>
+               </div>`;
+            });
+        }
+
+        // Accordion container for answers
+        const accordionId = `acc-${call.call_sid}`;
+        const answersContainer = `<div id="${accordionId}" style="display:none; margin-top:10px; padding: 10px; background: #fdfdfd; border-radius: 4px;">${answersHtml || '<span style="color:#999;">回答なし</span>'}${messagesHtml}</div>`;
+        const toggleBtn = `<button onclick="document.getElementById('${accordionId}').style.display = document.getElementById('${accordionId}').style.display === 'none' ? 'block' : 'none'" class="small secondary" style="margin-right:5px;">詳細表示</button>`;
+
+        const bulkDownload = `<a href="${API_BASE}/download_call_recordings/${call.call_sid}" class="btn-download-all" title="全録音をZIPでダウンロード"><i class="fas fa-file-archive"></i> 音声ZIP</a>`;
+
+        // Status badge
+        let statusBadge = `<span style="padding: 2px 6px; border-radius: 4px; background: #eee; font-size: 0.8rem;">${call.status}</span>`;
+        if (call.status === 'completed') statusBadge = `<span style="padding: 2px 6px; border-radius: 4px; background: #e8f5e9; color: #2e7d32; font-size: 0.8rem;">完了</span>`;
+        if (call.status === 'in-progress') statusBadge = `<span style="padding: 2px 6px; border-radius: 4px; background: #e3f2fd; color: #1565c0; font-size: 0.8rem;">通話中</span>`;
 
         tbody.innerHTML += `
             <tr>
                 <td>${new Date(call.started_at).toLocaleString('ja-JP')}</td>
-                <td>${escapeHtml(call.from_number)}</td>
-                <td>${escapeHtml(call.to_number)}</td>
-                <td style="font-weight:600; color:#3498db;">${escapeHtml(call.scenario_name || '-')}</td>
+                <td>${escapeHtml(formatPhone(call.from_number))}</td>
+                <td>${escapeHtml(formatPhone(call.to_number))}</td>
+                <td>${escapeHtml(call.scenario_name || '-')} <br>${statusBadge}</td>
                 <td>
-                    ${answersHtml || '<span style="color:#999;">回答なし</span>'}
-                    <div style="margin-top:10px; text-align:right;">${bulkDownload}</div>
+                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                        <div>${toggleBtn}</div>
+                        <div>${bulkDownload}</div>
+                    </div>
+                    ${answersContainer}
                 </td>
             </tr>`;
     });
 }
 
-function exportCSV() {
+function exportZIP() {
     const to = document.getElementById('filter-to').value;
     const start = document.getElementById('filter-start-date').value;
     const end = document.getElementById('filter-end-date').value;
+    const scenarioStatus = currentLogTab;
 
-    let url = `${API_BASE}/export_csv?`;
+    let url = `${API_BASE}/export_zip?`;
     if (to) url += `&to_number=${encodeURIComponent(to)}`;
     if (start) url += `&start_date=${start}`;
     if (end) url += `&end_date=${end}`;
+    url += `&scenario_status=${scenarioStatus}`;
 
     window.location.href = url;
 }
@@ -571,6 +758,24 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+
+// Phase 2: Retry Transcription
+async function retryTranscription(answerId) {
+    if (!confirm("文字起こしを再実行しますか？")) return;
+    try {
+        const res = await fetch(`${API_BASE}/retranscribe/${answerId}`, { method: 'POST' });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.detail || "Failed");
+        }
+        alert("再実行をキューに入れました。しばらくしてからリロードしてください。");
+        loadLogs();
+    } catch (e) {
+        console.error(e);
+        alert("エラーが発生しました: " + e);
+    }
 }
 
 // Init
