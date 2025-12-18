@@ -39,7 +39,10 @@ function openTab(tabId) {
 
     if (tabId === 'tab-scenarios') loadScenarios();
     if (tabId === 'tab-numbers') loadPhoneNumbers();
-    if (tabId === 'tab-logs') loadLogs();
+    if (tabId === 'tab-logs') {
+        renderScenarioNameTabs();
+        loadLogs();
+    }
 }
 
 // --- Scenarios (Left Pane) ---
@@ -678,12 +681,77 @@ document.getElementById('number-form').onsubmit = async (e) => {
 
 // --- Logs with Download ---
 let currentLogTab = 'active';
+let currentScenarioFilterId = null; // null = すべて
 
-function switchLogTab(status) {
+async function switchLogTab(status) {
     currentLogTab = status;
+    currentScenarioFilterId = null; // Reset filter when switching status
     document.querySelectorAll('.log-tab-btn').forEach(b => b.classList.remove('active'));
     document.getElementById(`log-tab-${status}`).classList.add('active');
+
+    // Refresh name tabs based on active/deleted status
+    await renderScenarioNameTabs();
     loadLogs();
+}
+
+async function renderScenarioNameTabs() {
+    const container = document.getElementById('log-scenario-name-tabs');
+    if (!container) return;
+
+    // Fetch scenarios corresponding to the current state (active or deleted)
+    const res = await fetch(`${API_BASE}/scenarios/?limit=1000`);
+    let data = await res.json();
+
+    // Scenarios endpoint returns active ones by default if not filtered?
+    // Wait, let's see backend scenarios endpoint.
+    /*
+    @router.get("/scenarios/", response_model=List[schemas.Scenario])
+    def read_scenarios(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+        return db.query(models.Scenario).filter(models.Scenario.deleted_at.is_(None)).order_by(models.Scenario.id.desc()).all()
+    */
+    // It only returns active ones. If currentLogTab is 'deleted', we might need to fetch deleted ones if we want to show their names.
+    // However, the user said "シナリオ名に紐づく通話ログのみ表示".
+    // If a scenario is deleted, we can still show its logs in the "Archive" tab.
+    // To keep it simple, I'll fetch ALL scenarios (maybe add a filter to backend or just use the current ones).
+
+    // For now, let's just use what /admin/scenarios/ gives us.
+    // If the user wants to filter deleted scenarios by name, we'd need a backend change to fetch deleted names.
+    // "最小変更で" suggests focusing on the active ones mostly or just what's available.
+
+    container.innerHTML = '';
+
+    // "すべて" button
+    const allBtn = document.createElement('button');
+    allBtn.textContent = 'すべて';
+    allBtn.className = 'small secondary';
+    if (currentScenarioFilterId === null) {
+        allBtn.style.background = '#3498db';
+        allBtn.style.color = '#white';
+        allBtn.style.borderColor = '#3498db';
+    }
+    allBtn.onclick = () => {
+        currentScenarioFilterId = null;
+        renderScenarioNameTabs();
+        loadLogs();
+    };
+    container.appendChild(allBtn);
+
+    data.forEach(s => {
+        const btn = document.createElement('button');
+        btn.textContent = s.name;
+        btn.className = 'small secondary';
+        if (currentScenarioFilterId === s.id) {
+            btn.style.background = '#3498db';
+            btn.style.color = 'white';
+            btn.style.borderColor = '#3498db';
+        }
+        btn.onclick = () => {
+            currentScenarioFilterId = s.id;
+            renderScenarioNameTabs();
+            loadLogs();
+        };
+        container.appendChild(btn);
+    });
 }
 
 async function loadLogs() {
@@ -695,6 +763,7 @@ async function loadLogs() {
     if (to) url += `&to_number=${encodeURIComponent(to)}`;
     if (start) url += `&start_date=${start}`;
     if (end) url += `&end_date=${end}`;
+    if (currentScenarioFilterId) url += `&scenario_id=${currentScenarioFilterId}`;
 
     const res = await fetch(url);
     const data = await res.json();

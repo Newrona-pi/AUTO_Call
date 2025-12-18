@@ -314,6 +314,7 @@ def read_calls(
     start_date: Optional[str] = None,  # YYYY-MM-DD format
     end_date: Optional[str] = None,    # YYYY-MM-DD format
     scenario_status: str = "active",   # active or deleted
+    scenario_id: Optional[int] = None,
     db: Session = Depends(get_db)
 ):
     from datetime import datetime
@@ -330,6 +331,9 @@ def read_calls(
     elif scenario_status == "deleted":
         query = query.join(models.Scenario).filter(models.Scenario.deleted_at.isnot(None))
     
+    if scenario_id:
+        query = query.filter(models.Call.scenario_id == scenario_id)
+        
     if to_number:
         query = query.filter(models.Call.to_number == to_number)
     if from_number:
